@@ -5,9 +5,11 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using Dalamud.Interface.Colors;
 using Dalamud.Plugin;
 using ImGuiNET;
 using Newtonsoft.Json;
+using SimpleTweaksPlugin.Events;
 using SimpleTweaksPlugin.Utility;
 
 namespace SimpleTweaksPlugin.TweakSystem; 
@@ -19,6 +21,8 @@ public abstract class BaseTweak {
 
     public virtual bool Ready { get; protected set; }
     public virtual bool Enabled { get; protected set; }
+    
+    public bool IsDisposed { get; private set; }
 
     public virtual string Key => GetType().Name;
 
@@ -32,8 +36,10 @@ public abstract class BaseTweak {
     protected virtual string Author => null;
     public virtual bool Experimental => false;
     public virtual IEnumerable<string> Tags { get; } = new string[0];
+    internal bool ForceOpenConfig { private get; set; }
 
     public TweakProvider TweakProvider { get; private set; } = null;
+    public SubTweakManager TweakManager { get; private set; } = null;
 
     public virtual bool CanLoad => true;
 
@@ -41,11 +47,12 @@ public abstract class BaseTweak {
 
     protected CultureInfo Culture => Plugin.Culture;
 
-    public void InterfaceSetup(SimpleTweaksPlugin plugin, DalamudPluginInterface pluginInterface, SimpleTweaksPluginConfig config, TweakProvider tweakProvider) {
+    public void InterfaceSetup(SimpleTweaksPlugin plugin, DalamudPluginInterface pluginInterface, SimpleTweaksPluginConfig config, TweakProvider tweakProvider, SubTweakManager tweakManager = null) {
         this.PluginInterface = pluginInterface;
         this.PluginConfig = config;
         this.Plugin = plugin;
         this.TweakProvider = tweakProvider;
+        this.TweakManager = tweakManager;
     }
 
     public string LocString(string key, string fallback, string description = null) {
@@ -81,6 +88,10 @@ public abstract class BaseTweak {
             if (ImGui.IsItemClicked()) {
                 ImGui.SetClipboardText(Key);
             }
+        }
+
+        if (TweakManager is { Enabled: false }) { 
+            ImGui.TextColored(ImGuiColors.DalamudRed, $"\tThis tweak is part of {TweakManager.Name}. Enable it in General Options.");
         }
     }
 
@@ -135,9 +146,12 @@ public abstract class BaseTweak {
     }
         
     public bool DrawConfig(ref bool hasChanged) {
+        var shouldForceOpenConfig = ForceOpenConfig;
+        ForceOpenConfig = false;
         var configTreeOpen = false;
         if ((UseAutoConfig || DrawConfigTree != null) && Enabled) {
             var x = ImGui.GetCursorPosX();
+            if (shouldForceOpenConfig) ImGui.SetNextItemOpen(true);
             if (ImGui.TreeNode($"{LocalizedName}##treeConfig_{GetType().Name}")) {
                 configTreeOpen = true;
                 DrawCommon();
@@ -348,15 +362,22 @@ public abstract class BaseTweak {
     }
 
     public virtual void Enable() {
+        EventController.RegisterEvents(this);
         Enabled = true;
     }
 
     public virtual void Disable() {
+        EventController.UnregisterEvents(this);
         Enabled = false;
     }
 
     public virtual void Dispose() {
         Ready = false;
+    }
+
+    internal void InternalDispose() {
+        Dispose();
+        IsDisposed = true;
     }
 
     protected ChangelogEntry AddChangelog(string version, string log) => Changelog.Add(this, version, log);

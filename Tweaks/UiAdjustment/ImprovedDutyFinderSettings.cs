@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 using System.Threading.Tasks;
+using Dalamud.Game.ClientState.Conditions;
 using Dalamud.Interface;
 using Dalamud.Utility;
 using FFXIVClientStructs.FFXIV.Client.Game.UI;
@@ -26,6 +27,7 @@ public unsafe class ImprovedDutyFinderSettings : UiAdjustments.SubTweak {
     public override void Setup() {
         AddChangelogNewTweak("1.8.3.0");
         AddChangelog("1.8.4.0", "Fixed UI displaying on wrong monitor in specific circumstances.").Author("Aireil");
+        AddChangelog("1.8.7.2", "Fixed tweak not working in 6.4");
         base.Setup();
     }
 
@@ -57,6 +59,7 @@ public unsafe class ImprovedDutyFinderSettings : UiAdjustments.SubTweak {
     private delegate* unmanaged<byte*, nint, void> setContentsFinderSettings;
     private volatile bool iconsReady;
     private Dictionary<uint, TextureWrap> icons;
+    private Dictionary<uint, TextureWrap> iconsGrayscale;
     private readonly List<DutyFinderSetting> dutyFinderSettingOrder = new() {
         DutyFinderSetting.JoinPartyInProgress,
         DutyFinderSetting.UnrestrictedParty,
@@ -108,20 +111,20 @@ public unsafe class ImprovedDutyFinderSettings : UiAdjustments.SubTweak {
     }
 
     private static byte GetCurrentSettingValue(DutyFinderSetting dutyFinderSetting) {
-        var contentsFinder = UIState.Instance()->ContentsFinder;
+        var contentsFinder = ContentsFinder.Instance();
         return dutyFinderSetting switch {
             DutyFinderSetting.Ja => (byte)GameConfig.UiConfig.GetUInt("ContentsFinderUseLangTypeJA"),
             DutyFinderSetting.En => (byte)GameConfig.UiConfig.GetUInt("ContentsFinderUseLangTypeEN"),
             DutyFinderSetting.De => (byte)GameConfig.UiConfig.GetUInt("ContentsFinderUseLangTypeDE"),
             DutyFinderSetting.Fr => (byte)GameConfig.UiConfig.GetUInt("ContentsFinderUseLangTypeFR"),
-            DutyFinderSetting.LootRule => (byte)contentsFinder.LootRules,
+            DutyFinderSetting.LootRule => (byte)contentsFinder->LootRules,
             DutyFinderSetting.JoinPartyInProgress => (byte)GameConfig.UiConfig.GetUInt("ContentsFinderSupplyEnable"),
-            DutyFinderSetting.UnrestrictedParty => *(byte*)&contentsFinder.IsUnrestrictedParty,
-            DutyFinderSetting.LevelSync => *(byte*)&contentsFinder.IsLevelSync,
-            DutyFinderSetting.MinimumIl => *(byte*)&contentsFinder.IsMinimalIL,
-            DutyFinderSetting.SilenceEcho => *(byte*)&contentsFinder.IsSilenceEcho,
-            DutyFinderSetting.ExplorerMode => *(byte*)&contentsFinder.IsExplorerMode,
-            DutyFinderSetting.LimitedLevelingRoulette => *(byte*)&contentsFinder.IsLimitedLevelingRoulette,
+            DutyFinderSetting.UnrestrictedParty => *(byte*)&contentsFinder->IsUnrestrictedParty,
+            DutyFinderSetting.LevelSync => *(byte*)&contentsFinder->IsLevelSync,
+            DutyFinderSetting.MinimumIl => *(byte*)&contentsFinder->IsMinimalIL,
+            DutyFinderSetting.SilenceEcho => *(byte*)&contentsFinder->IsSilenceEcho,
+            DutyFinderSetting.ExplorerMode => *(byte*)&contentsFinder->IsExplorerMode,
+            DutyFinderSetting.LimitedLevelingRoulette => *(byte*)&contentsFinder->IsLimitedLevelingRoulette,
             _ => 0,
         };
     }
@@ -153,6 +156,7 @@ public unsafe class ImprovedDutyFinderSettings : UiAdjustments.SubTweak {
 
     private void LoadIcons() {
         this.icons = new Dictionary<uint, TextureWrap>();
+        this.iconsGrayscale = new Dictionary<uint, TextureWrap>();
         var iconIdsToLoad = new List<uint>();
 
         foreach (var setting in Enum.GetValues<DutyFinderSetting>()) {
@@ -167,9 +171,10 @@ public unsafe class ImprovedDutyFinderSettings : UiAdjustments.SubTweak {
 
         Task.Run(() => {
             foreach (var id in iconIdsToLoad) {
-                var icon = GetIconTextureWrap(id);
-                if (icon != null) {
+                var (icon, iconGrayscale) = GetIconTextureWraps(id);
+                if (icon != null && this.iconsGrayscale != null) {
                     this.icons[id] = icon;
+                    this.iconsGrayscale[id] = iconGrayscale;
                 } else {
                     this.DisposeIcons();
                     SimpleLog.Error("Failed to load icons.");
@@ -181,14 +186,15 @@ public unsafe class ImprovedDutyFinderSettings : UiAdjustments.SubTweak {
         });
     }
 
-    private static TextureWrap GetIconTextureWrap(uint id) {
+    private static (TextureWrap icon, TextureWrap iconGrayscale) GetIconTextureWraps(uint id) {
         try {
             var iconPath = $"ui/icon/060000/0{id}_hr1.tex";
             var iconTex = Service.Data.GetFile<TexFile>(iconPath);
             if (iconTex != null) {
                 var tex = Service.PluginInterface.UiBuilder.LoadImageRaw(iconTex.GetRgbaImageData(), iconTex.Header.Width, iconTex.Header.Height, 4);
-                if (tex.ImGuiHandle != nint.Zero) {
-                    return tex;
+                var textGrayscale = Service.PluginInterface.UiBuilder.LoadImageRaw(GetGrayscaleImageData(iconTex), iconTex.Header.Width, iconTex.Header.Height, 4);
+                if (tex.ImGuiHandle != nint.Zero && textGrayscale.ImGuiHandle != nint.Zero) {
+                    return (tex, textGrayscale);
                 }
             }
         }
@@ -196,7 +202,27 @@ public unsafe class ImprovedDutyFinderSettings : UiAdjustments.SubTweak {
             SimpleLog.Error(ex);
         }
 
-        return null;
+        return (null, null);
+    }
+
+    private static byte[] GetGrayscaleImageData(TexFile tex) {
+        var rgba = tex.GetRgbaImageData();
+        var pixels = rgba.Length / 4;
+        var newData = new byte[rgba.Length];
+        for (var i = 0; i < pixels; i++) {
+            var pixel = i * 4;
+            var alpha = rgba[pixel + 3];
+
+            if (alpha > 0) {
+                var avg = (byte)(0.2125f * rgba[pixel] + 0.7154f * rgba[pixel + 1] + 0.0721f * rgba[pixel + 2]);
+                newData[pixel] = avg;
+                newData[pixel + 1] = avg;
+                newData[pixel + 2] = avg;
+            }
+
+            newData[pixel + 3] = alpha;
+        }
+        return newData;
     }
 
     private void DisposeIcons() {
@@ -207,11 +233,28 @@ public unsafe class ImprovedDutyFinderSettings : UiAdjustments.SubTweak {
 
             this.icons.Clear();
         }
+
+        if (this.iconsGrayscale != null) {
+            foreach (var (_, icon) in this.iconsGrayscale) {
+                icon.Dispose();
+            }
+
+            this.iconsGrayscale.Clear();
+        }
     }
 
-    private TextureWrap GetIcon(DutyFinderSetting dutyFinderSetting, LootRule lootRule = LootRule.Normal) {
-        if (this.iconsReady && this.icons.TryGetValue(GetIconId(dutyFinderSetting, lootRule), out var iconTex))
+    private TextureWrap GetIcon(DutyFinderSetting dutyFinderSetting, bool grayscale, LootRule lootRule = LootRule.Normal) {
+        if (!this.iconsReady) {
+            return null;
+        }
+
+        if (!grayscale && this.icons.TryGetValue(GetIconId(dutyFinderSetting, lootRule), out var iconTex)) {
             return iconTex;
+        }
+
+        if (grayscale && this.iconsGrayscale.TryGetValue(GetIconId(dutyFinderSetting, lootRule), out var iconTexGrayscale)) {
+            return iconTexGrayscale;
+        }
 
         return null;
     }
@@ -244,7 +287,13 @@ public unsafe class ImprovedDutyFinderSettings : UiAdjustments.SubTweak {
         try {
             var windowScale = root->ScaleX;
             ImGuiHelpers.ForceNextWindowMainViewport();
-            ImGui.SetNextWindowPos(new Vector2(root->X + ((header->X + buttonsHeader->X) * windowScale), root->Y + (buttonsHeader->Y * windowScale)), ImGuiCond.Always);
+            ImGuiHelpers.SetNextWindowPosRelativeMainViewport(
+                new Vector2(
+                    root->X + ((header->X + buttonsHeader->X) * windowScale),
+                    root->Y + (buttonsHeader->Y * windowScale)
+                    ),
+                ImGuiCond.Always
+                );
             if (ImGui.Begin(
                     "ImprovedDutyFinderSettings",
                     ImGuiWindowFlags.NoTitleBar
@@ -259,12 +308,14 @@ public unsafe class ImprovedDutyFinderSettings : UiAdjustments.SubTweak {
                 var iconSize = firstButton->Width * windowScale;
                 var nextButton = firstButton;
                 const int nbButtons = 8;
+                var isQueuedForDuty = Service.Condition[ConditionFlag.BoundToDuty97];
                 for (var i = 0; i < nbButtons && nextButton != null; i++) {
                     var setting = this.dutyFinderSettingOrder[i];
+                    var isSettingDisabled = isQueuedForDuty || (setting == DutyFinderSetting.LevelSync && GetCurrentSettingValue(DutyFinderSetting.UnrestrictedParty) == 0);
 
                     ImGui.SameLine(nextButton->X * windowScale);
                     var lootRule = (LootRule)GetCurrentSettingValue(DutyFinderSetting.LootRule);
-                    var icon = this.GetIcon(setting, lootRule);
+                    var icon = this.GetIcon(setting, isSettingDisabled, lootRule);
                     if (icon != null) {
                         if (ImGui.Selectable($"##DutyFinderSettingButtons{i}", false, ImGuiSelectableFlags.None, new Vector2(iconSize, (header->Height - 5) * windowScale))) {
                             ToggleSetting(setting);
@@ -274,10 +325,6 @@ public unsafe class ImprovedDutyFinderSettings : UiAdjustments.SubTweak {
                         ImGui.SetCursorPosY(ImGui.GetCursorPosY() + (header->Y * windowScale));
                         ImGui.SetCursorPosX(ImGui.GetCursorPosX() - iconSize);
                         var tint = GetCurrentSettingValue(setting) == 0 ? new Vector4(0.5f) : new Vector4(1.0f);
-                        if (setting == DutyFinderSetting.LevelSync && GetCurrentSettingValue(DutyFinderSetting.UnrestrictedParty) == 0) {
-                            tint = new Vector4(0.3f);
-                        }
-
                         ImGui.Image(icon.ImGuiHandle, new Vector2(iconSize), new Vector2(0), new Vector2(1), tint);
 
                         if (ImGui.IsItemHovered()) {
@@ -321,6 +368,11 @@ public unsafe class ImprovedDutyFinderSettings : UiAdjustments.SubTweak {
     }
 
     private void ToggleSetting(DutyFinderSetting setting) {
+        // block setting change if queued for a duty
+        if (Service.Condition[ConditionFlag.BoundToDuty97]) {
+            return;
+        }
+
         // always need at least one language enabled
         if (setting is DutyFinderSetting.Ja or DutyFinderSetting.En or DutyFinderSetting.De or DutyFinderSetting.Fr) {
             var nbEnabledLanguages = GetCurrentSettingValue(DutyFinderSetting.Ja)

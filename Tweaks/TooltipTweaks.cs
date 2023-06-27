@@ -4,6 +4,7 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using Dalamud.Game.Text.SeStringHandling;
 using Dalamud.Memory;
+using Dalamud.Memory.Exceptions;
 using FFXIVClientStructs.FFXIV.Client.Game;
 using FFXIVClientStructs.FFXIV.Component.GUI;
 using SimpleTweaksPlugin.TweakSystem;
@@ -14,8 +15,6 @@ namespace SimpleTweaksPlugin.Tweaks;
 public class TooltipTweaks : SubTweakManager<TooltipTweaks.SubTweak> {
     public override bool AlwaysEnabled => true;
 
-    public static Dictionary<ItemTooltipField, IntPtr> ItemStringPointers = new();
-    public static Dictionary<ActionTooltipField, IntPtr> ActionStringPointers = new();
 
     public abstract class SubTweak : BaseTweak {
         public override string Key => $"{nameof(TooltipTweaks)}@{base.Key}";
@@ -28,34 +27,36 @@ public class TooltipTweaks : SubTweakManager<TooltipTweaks.SubTweak> {
         
         protected static unsafe SeString GetTooltipString(StringArrayData* stringArrayData, int field) {
             try {
+                if (stringArrayData->AtkArrayData.Size <= field) 
+                    throw new IndexOutOfRangeException($"Attempted to get Index#{field} ({field}) but size is only {stringArrayData->AtkArrayData.Size}");
+
                 var stringAddress = new IntPtr(stringArrayData->StringArray[field]);
                 return stringAddress == IntPtr.Zero ? null : MemoryHelper.ReadSeStringNullTerminated(stringAddress);
-            } catch {
-                return null;
+            } catch (Exception ex) {
+                SimpleLog.Error(ex);
+                return new SeString();
             }
         }
 
         protected static unsafe void SetTooltipString(StringArrayData* stringArrayData, TooltipTweaks.ItemTooltipField field, SeString seString) {
             try {
-                if (!ItemStringPointers.ContainsKey(field)) ItemStringPointers.Add(field, Marshal.AllocHGlobal(4096));
-                var bytes = seString.Encode();
-                Marshal.Copy(bytes, 0, ItemStringPointers[field], bytes.Length);
-                Marshal.WriteByte(ItemStringPointers[field], bytes.Length, 0);
-                stringArrayData->StringArray[(int)field] = (byte*)ItemStringPointers[field];
-            } catch {
-                //
+                seString ??= new SeString();
+                var bytes = seString.Encode().ToList();
+                bytes.Add(0);
+                stringArrayData->SetValue((int)field, bytes.ToArray(), false, true, false);
+            } catch (Exception ex) {
+                throw;
             }
         }
         
         protected static unsafe void SetTooltipString(StringArrayData* stringArrayData, TooltipTweaks.ActionTooltipField field, SeString seString) {
             try {
-                if (!ActionStringPointers.ContainsKey(field)) ActionStringPointers.Add(field, Marshal.AllocHGlobal(4096));
-                var bytes = seString.Encode();
-                Marshal.Copy(bytes, 0, ActionStringPointers[field], bytes.Length);
-                Marshal.WriteByte(ActionStringPointers[field], bytes.Length, 0);
-                stringArrayData->StringArray[(int)field] = (byte*)ActionStringPointers[field];
+                seString ??= new SeString();
+                var bytes = seString.Encode().ToList();
+                bytes.Add(0);
+                stringArrayData->SetValue((int)field, bytes.ToArray(), false, true, false);
             } catch {
-                //
+                throw;
             }
         }
 
@@ -65,6 +66,7 @@ public class TooltipTweaks : SubTweakManager<TooltipTweaks.SubTweak> {
     }
 
     public override string Name => "Tooltip Tweaks";
+    public override uint Version => 2;
     private unsafe delegate IntPtr ActionTooltipDelegate(AtkUnitBase* a1, void* a2, ulong a3);
     private HookWrapper<ActionTooltipDelegate> actionTooltipHook;
 
@@ -82,6 +84,12 @@ public class TooltipTweaks : SubTweakManager<TooltipTweaks.SubTweak> {
 
     private unsafe delegate void* GetItemRowDelegate(uint itemId);
     private HookWrapper<GetItemRowDelegate> getItemRowHook;
+
+    public override void Setup() {
+        AddChangelog("1.8.5.1", "Added additional protections to attempt to reduce crashing. Please report any crashes you believe may be related to tooltips.");
+        AddChangelog("1.8.6.1", "Yet another attempt at fixing crashes.");
+        base.Setup();
+    }
 
     public override unsafe void Enable() {
         if (!Ready) return;
@@ -171,14 +179,6 @@ public class TooltipTweaks : SubTweakManager<TooltipTweaks.SubTweak> {
         generateItemTooltipHook?.Dispose();
         generateActionTooltipHook?.Dispose();
         getItemRowHook?.Dispose();
-        foreach (var i in ItemStringPointers.Values) {
-            Marshal.FreeHGlobal(i);
-        }
-        foreach (var i in ActionStringPointers.Values) {
-            Marshal.FreeHGlobal(i);
-        }
-        ItemStringPointers.Clear();
-        ActionStringPointers.Clear();
         base.Dispose();
     }
 

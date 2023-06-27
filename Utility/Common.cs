@@ -39,7 +39,6 @@ public static unsafe class Common {
     public static event Action FrameworkUpdate;
     
     public static void InvokeFrameworkUpdate() {
-        if (!SimpleTweaksPlugin.Plugin.PluginConfig.NoFools && Fools.IsFoolsDay) Fools.FrameworkUpdate();
         if (!PerformanceMonitor.DoFrameworkMonitor) {
             FrameworkUpdate?.Invoke();
             return;
@@ -316,6 +315,11 @@ public static unsafe class Common {
     public struct EventObject {
         [FieldOffset(0)] public ulong Unknown0;
         [FieldOffset(8)] public ulong Unknown8;
+    }
+
+    public static EventObject* SendEvent(AgentId agentId, ulong eventKind, params object[] eventparams) {
+        var agent = AgentModule.Instance()->GetAgentByInternalId(agentId);
+        return agent == null ? null : SendEvent(agent, eventKind, eventparams);
     }
 
     public static EventObject* SendEvent(AgentInterface* agentInterface, ulong eventKind, params object[] eventParams) {

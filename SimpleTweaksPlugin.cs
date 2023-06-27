@@ -279,6 +279,22 @@ namespace SimpleTweaksPlugin {
                             Service.Chat.PrintError($"\"{splitArgString[1]}\" is not a valid tweak id.");
                             return;
                         }
+                        case "f":
+                        case "find": {
+                            if (splitArgString.Length < 2) {
+                                Service.Chat.PrintError("/tweaks find <tweakid>");
+                                return;
+                            }
+                            var tweak = GetTweakById(splitArgString[1]);
+                            if (tweak != null) {
+                                PluginConfig.FocusTweak(tweak);
+                                return;
+                                
+                            }
+                            Service.Chat.PrintError($"\"{splitArgString[1]}\" is not a valid tweak id.");
+
+                            return;
+                        }
                         default: {
                             var tweak = GetTweakById(splitArgString[0]);
                             if (tweak != null) {
@@ -431,13 +447,31 @@ namespace SimpleTweaksPlugin {
 
         internal readonly List<CaughtError> ErrorList = new List<CaughtError>();
 #if DEBUG
+        public void Error(Exception ex, string message = "", [CallerFilePath] string callerFilePath = "", [CallerLineNumber] int callerLineNumber = 0, [CallerMemberName] string callerMemberName = "") {
+            Error(null, ex, true, message, callerFilePath, callerLineNumber, callerMemberName);
+        }
+        
         public void Error(BaseTweak tweak, Exception exception, bool allowContinue = false, string message = "", [CallerFilePath] string callerFilePath = "", [CallerLineNumber] int callerLineNumber = 0, [CallerMemberName] string callerMemberName = "" ) {
-
-            SimpleLog.Error($"Exception in '{tweak.Name}'" + (string.IsNullOrEmpty(message) ? "" : ($": {message}")), callerFilePath, callerMemberName, callerLineNumber);
+            if (tweak == null) {
+                SimpleLog.Error($"Exception in '{tweak.Name}'" + (string.IsNullOrEmpty(message) ? "" : ($": {message}")), callerFilePath, callerMemberName, callerLineNumber);
+            } else {
+                SimpleLog.Error("Exception in SimpleTweaks framework. "+ (string.IsNullOrEmpty(message) ? "" : ($": {message}")), callerFilePath, callerMemberName, callerLineNumber);
+            }
             SimpleLog.Error($"{exception}", callerFilePath, callerMemberName, callerLineNumber);
 #else
+
+        public void Error(Exception ex, string message = "") {
+            Error(null, ex, true, message);
+        }
+
         public void Error(BaseTweak tweak, Exception exception, bool allowContinue = false, string message="") {
-            SimpleLog.Error($"Exception in '{tweak.Name}'" + (string.IsNullOrEmpty(message) ? "" : ($": {message}")));
+            if (tweak == null) {
+                SimpleLog.Error($"Exception in SimpleTweaks framework. " + (string.IsNullOrEmpty(message) ? "" : ($": {message}")));
+            } else {
+                SimpleLog.Error($"Exception in '{tweak.Name}'" + (string.IsNullOrEmpty(message) ? "" : ($": {message}")));
+            }
+            
+            
             SimpleLog.Error($"{exception}");
 #endif
             var err = new CaughtError {

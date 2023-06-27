@@ -1,3 +1,5 @@
 StopCraftingButton
-UiAdjustments@LockWindowPosition
 FixedShadowDistance
+RefreshMarketPrices
+TooltipTweaks
+UiAdjustments@DutyListBackground

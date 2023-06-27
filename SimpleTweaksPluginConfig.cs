@@ -32,6 +32,7 @@ public partial class SimpleTweaksPluginConfig : IPluginConfiguration {
     public bool DisableAutoOpen;
     public bool ShowInDevMenu;
     public bool NoFools;
+    public bool NotBaby;
 
     public bool ShowTweakDescriptions = true;
     public bool ShowTweakIDs;
@@ -59,11 +60,21 @@ public partial class SimpleTweaksPluginConfig : IPluginConfiguration {
     [NonSerialized] private List<BaseTweak> searchResults = new List<BaseTweak>();
 
     internal void FocusTweak(BaseTweak tweak) {
+        plugin.ConfigWindow.IsOpen = true;
+        plugin.ConfigWindow.Collapsed = false;
+        searchResults.Clear();
+        
+        if (tweak is SubTweakManager stm) {
+            setTab = stm;
+            searchInput = string.Empty;
+            lastSearchInput = string.Empty;
+            return;
+        }
+        
         searchInput = tweak.Name;
         lastSearchInput = tweak.Name;
-        searchResults.Clear();
         searchResults.Add(tweak);
-        plugin.ConfigWindow.Collapsed = false;
+        tweak.ForceOpenConfig = true;
     }
 
     internal void ClearSearch() {
@@ -78,7 +89,7 @@ public partial class SimpleTweaksPluginConfig : IPluginConfiguration {
         var enabled = t.Enabled;
         if (t.Experimental && !ShowExperimentalTweaks && !enabled) return;
 
-        if (t is IDisabledTweak || (!enabled && ImGui.GetIO().KeyShift)) {
+        if (t is IDisabledTweak || (!enabled && ImGui.GetIO().KeyShift) || t.TweakManager is {Enabled: false}) {
             if (HiddenTweaks.Contains(t.Key)) {
                 if (ImGui.Button($"S##unhideTweak_{t.Key}", new Vector2(23) * ImGui.GetIO().FontGlobalScale)) {
                     HiddenTweaks.Remove(t.Key);
@@ -272,18 +283,6 @@ public partial class SimpleTweaksPluginConfig : IPluginConfiguration {
 
                 if (ImGui.BeginTabItem(Loc.Localize("General Options / TabHeader", "General Options") + $"###generalOptionsTab")) {
                     ImGui.BeginChild($"generalOptions-scroll", new Vector2(-1, -1));
-                    if (Fools.IsFoolsDay) {
-                        ImGui.ColorConvertHSVtoRGB((Service.PluginInterface.UiBuilder.FrameCount % 512) / 512f, 1, 1, out var r, out var g, out var b);
-                        ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(r, g, b, 1));
-                        ImGui.PushStyleColor(ImGuiCol.FrameBg, new Vector4(r, g, b, 0.5f));
-                        ImGui.PushStyleColor(ImGuiCol.FrameBgHovered, new Vector4(r, g, b, 0.7f));
-                        if (ImGui.Checkbox("No Jokes", ref NoFools)) {
-                            if (NoFools) Fools.Reset();
-                            Save();
-                        }
-                        ImGui.PopStyleColor(3);
-                        ImGui.Separator();
-                    }
 
                     if (ImGui.Checkbox(Loc.Localize("General Options / Show Experimental Tweaks", "Show Experimental Tweaks."), ref ShowExperimentalTweaks)) Save();
                     ImGui.Separator();

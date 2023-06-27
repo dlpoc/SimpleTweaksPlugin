@@ -108,18 +108,7 @@ public unsafe class TargetCastbarCountdown : UiAdjustments.SubTweak
         
         base.Disable();
     }
-
-    public override void Dispose()
-    {
-        Common.FrameworkUpdate -= OnFrameworkUpdate;
-        Service.ClientState.EnterPvP -= OnEnterPvP;
-        Service.ClientState.LeavePvP -= OnLeavePvP;
-        
-        FreeAllNodes();
-        
-        base.Dispose();
-    }
-
+    
     private void OnEnterPvP()
     {
         Common.FrameworkUpdate -= OnFrameworkUpdate;
@@ -231,8 +220,8 @@ public unsafe class TargetCastbarCountdown : UiAdjustments.SubTweak
         TryFreeTextNode(AddonFocusTargetInfo, CastbarTextNodeId);
     }
 
-    private void TryFreeTextNode(AtkUnitBase* addon, uint nodeId)
-    {
+    private void TryFreeTextNode(AtkUnitBase* addon, uint nodeId) {
+        if (addon == null) return;
         var textNode = Common.GetNodeByID<AtkTextNode>(&addon->UldManager, nodeId);
         if (textNode is not null)
         {
